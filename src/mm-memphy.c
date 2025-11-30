@@ -155,14 +155,14 @@ int MEMPHY_get_freefp(struct memphy_struct *mp, addr_t *retfpn)
    pthread_mutex_lock(&mp->lock); // LOCKED
    struct framephy_struct *fp = mp->free_fp_list;
 
-   if (fp == NULL)
+   if (fp == NULL){
       pthread_mutex_unlock(&mp->lock); //UNLOCKED
       return -1;
-
+   }
    *retfpn = fp->fpn;
    mp->free_fp_list = fp->fp_next;
 
-   /* MEMPHY is iteratively used up until its exhausted
+   /* MEMPHY is it   eratively used up until its exhausted
     * No garbage collector acting then it not been released
     */
    free(fp);
