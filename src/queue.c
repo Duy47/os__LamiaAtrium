@@ -23,29 +23,40 @@ void enqueue(struct queue_t *q, struct pcb_t *proc)
 
 struct pcb_t *dequeue(struct queue_t *q)
 {
-        /* TODO: return a pcb whose prioprity is the highest
-         * in the queue [q] and remember to remove it from q
-         * */
-        if (q == NULL || q->size == 0)
+    if (q == NULL || q->size == 0)
         return NULL;
 
-        int best = 0;
+#ifdef MLQ_SCHED
+    // --- MLQ mode: dùng FIFO trong từng hàng prio ---
+    struct pcb_t *chosen = q->proc[0];
 
-        for (int i = 1; i < q->size; i++) {
-                if (q->proc[i]->priority < q->proc[best]->priority) {
-                best = i;
-                }
+    for (int i = 0; i < q->size - 1; i++) {
+        q->proc[i] = q->proc[i + 1];
+    }
+
+    q->size--;
+
+    return chosen;
+#else
+    // --- Mode cũ: chọn process có priority cao hơn (số nhỏ hơn) ---
+    int best = 0;
+
+    for (int i = 1; i < q->size; i++) {
+        if (q->proc[i]->priority < q->proc[best]->priority) {
+            best = i;
         }
+    }
 
-        struct pcb_t *chosen = q->proc[best];
+    struct pcb_t *chosen = q->proc[best];
 
-        for (int i = best; i < q->size - 1; i++) {
-                q->proc[i] = q->proc[i + 1];
-        }
+    for (int i = best; i < q->size - 1; i++) {
+        q->proc[i] = q->proc[i + 1];
+    }
 
-        q->size--;
+    q->size--;
 
-        return chosen;
+    return chosen;
+#endif
 }
 
 struct pcb_t *purgequeue(struct queue_t *q, struct pcb_t *proc)

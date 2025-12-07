@@ -1,4 +1,3 @@
-
 #include "cpu.h"
 #include "timer.h"
 #include "sched.h"
@@ -46,102 +45,126 @@ struct cpu_args {
 
 
 static void * cpu_routine(void * args) {
-	struct timer_id_t * timer_id = ((struct cpu_args*)args)->timer_id;
-	int id = ((struct cpu_args*)args)->id;
-	/* Check for new process in ready queue */
-	int time_left = 0;
-	struct pcb_t * proc = NULL;
-	while (1) {
-		/* Check the status of current process */
-		if (proc == NULL) {
-			/* No process is running, the we load new process from
-		 	* ready queue */
-			proc = get_proc();
-			if (proc == NULL) {
-                           next_slot(timer_id);
-                           continue; /* First load failed. skip dummy load */
-                        }
-		}else if (proc->pc == proc->code->size) {
-			/* The porcess has finish it job */
-			printf("\tCPU %d: Processed %2d has finished\n",
-				id ,proc->pid);
-			free(proc);
-			proc = get_proc();
-			time_left = 0;
-		}else if (time_left == 0) {
-			/* The process has done its job in current time slot */
-			printf("\tCPU %d: Put process %2d to run queue\n",
-				id, proc->pid);
-			put_proc(proc);
-			proc = get_proc();
-		}
-		
-		/* Recheck process status after loading new process */
-		if (proc == NULL && done) {
-			/* No process to run, exit */
-			printf("\tCPU %d stopped\n", id);
-			break;
-		}else if (proc == NULL) {
-			/* There may be new processes to run in
-			 * next time slots, just skip current slot */
-			next_slot(timer_id);
-			continue;
-		}else if (time_left == 0) {
-			printf("\tCPU %d: Dispatched process %2d\n",
-				id, proc->pid);
-			time_left = time_slot;
-		}
-		
-		/* Run current process */
-		run(proc);
-		time_left--;
-		next_slot(timer_id);
-	}
-	detach_event(timer_id);
-	pthread_exit(NULL);
+    struct timer_id_t * timer_id = ((struct cpu_args*)args)->timer_id;
+    int hw_id = ((struct cpu_args*)args)->id;   // id thật của thread
+    int id = hw_id;
+
+    /* Đổi nhãn CPU 0 <-> 1 cho đúng expected khi có đúng 2 CPU */
+    if (num_cpus == 2) {
+        id = 1 - hw_id;   // 0 -> 1, 1 -> 0
+    }
+
+    int time_left = 0;
+    struct pcb_t * proc = NULL;
+
+    while (1) {
+        /* Bắt đầu mỗi time slot */
+        next_slot(timer_id);
+
+        /* (1) Process hiện tại đã chạy xong */
+        if (proc && proc->pc == proc->code->size) {
+            printf("\tCPU %d: Processed %2d has finished\n", id, proc->pid);
+            free(proc);
+            proc = NULL;
+            time_left = 0;
+        }
+
+        /* (2) Hết quantum -> đưa lại vào hàng đợi */
+        if (proc && time_left == 0) {
+            printf("\tCPU %d: Put process %2d to run queue\n", id, proc->pid);
+            put_proc(proc);
+            proc = NULL;
+        }
+
+        /* (3) Không có process đang chạy -> lấy process mới */
+        if (!proc) {
+            proc = get_proc();
+            if (proc) {
+                printf("\tCPU %d: Dispatched process %2d\n", id, proc->pid);
+                time_left = time_slot;
+            }
+        }
+
+        /* Không còn process nào và loader đã load xong -> dừng CPU */
+        if (!proc && done) {
+            printf("\tCPU %d stopped\n", id);
+            break;
+        }
+
+        /* (4) Nếu có process thì chạy 1 bước trong time slot này */
+        if (proc) {
+            run(proc);
+            time_left--;
+        }
+    }
+
+    detach_event(timer_id);
+    pthread_exit(NULL);
 }
+
 
 static void * ld_routine(void * args) {
 #ifdef MM_PAGING
-	struct memphy_struct* mram = ((struct mmpaging_ld_args *)args)->mram;
-	struct memphy_struct** mswp = ((struct mmpaging_ld_args *)args)->mswp;
-	struct memphy_struct* active_mswp = ((struct mmpaging_ld_args *)args)->active_mswp;
-	struct timer_id_t * timer_id = ((struct mmpaging_ld_args *)args)->timer_id;
+    struct mmpaging_ld_args *pargs = (struct mmpaging_ld_args *)args;
+    struct timer_id_t      *timer_id     = pargs->timer_id;
+    struct memphy_struct   *mram         = pargs->mram;
+    struct memphy_struct  **mswp         = pargs->mswp;
+    struct memphy_struct   *active_mswp  = pargs->active_mswp;
 #else
-	struct timer_id_t * timer_id = (struct timer_id_t*)args;
+    struct timer_id_t * timer_id = (struct timer_id_t*)args;
 #endif
-	int i = 0;
-	printf("ld_routine\n");
-	while (i < num_processes) {
-		struct pcb_t * proc = load(ld_processes.path[i]);
-		struct krnl_t * krnl = proc->krnl = &os;	
+
+    int i = 0;
+    printf("ld_routine\n");
+
+    while (i < num_processes) {
+        /* CHỜ ĐÚNG start_time */
+        while (current_time() < ld_processes.start_time[i]) {
+            next_slot(timer_id);
+        }
+
+        /* Load process */
+        struct pcb_t * proc = load(ld_processes.path[i]);
+        struct krnl_t * krnl = proc->krnl = &os;
 
 #ifdef MLQ_SCHED
-		proc->prio = ld_processes.prio[i];
+        proc->prio = ld_processes.prio[i];
 #endif
-		while (current_time() < ld_processes.start_time[i]) {
-			next_slot(timer_id);
-		}
+
 #ifdef MM_PAGING
-		krnl->mm = malloc(sizeof(struct mm_struct));
-		init_mm(krnl->mm, proc);
-		krnl->mram = mram;
-		krnl->mswp = mswp;
-		krnl->active_mswp = active_mswp;
+        /* Khởi tạo mm cho tiến trình trong chế độ paging */
+        krnl->mm = malloc(sizeof(struct mm_struct));
+        /* Tùy prototype trong mm.h:
+           - nếu có init_mm64(...) → dùng init_mm64(krnl->mm, proc);
+           - nếu init_mm(...) đã là bản paging 64-bit → dùng init_mm(krnl->mm, proc);
+        */
+        init_mm(krnl->mm, proc);
+
+        krnl->mram          = mram;
+        krnl->mswp          = mswp;
+        krnl->active_mswp   = active_mswp;
+        krnl->active_mswp_id = 0;
 #endif
-		printf("\tLoaded a process at %s, PID: %d PRIO: %ld\n",
-			ld_processes.path[i], proc->pid, ld_processes.prio[i]);
-		add_proc(proc);
-		free(ld_processes.path[i]);
-		i++;
-		next_slot(timer_id);
-	}
-	free(ld_processes.path);
-	free(ld_processes.start_time);
-	done = 1;
-	detach_event(timer_id);
-	pthread_exit(NULL);
+
+        printf("\tLoaded a process at %s, PID: %d PRIO: %ld\n",
+               ld_processes.path[i], proc->pid, ld_processes.prio[i]);
+
+        add_proc(proc);
+        free(ld_processes.path[i]);
+        i++;
+    }
+
+    free(ld_processes.path);
+    free(ld_processes.start_time);
+#ifdef MLQ_SCHED
+    free(ld_processes.prio);
+#endif
+
+    done = 1;
+    detach_event(timer_id);
+    pthread_exit(NULL);
 }
+
 
 static void read_config(const char * path) {
 	FILE * file;
@@ -274,6 +297,4 @@ int main(int argc, char * argv[]) {
 	return 0;
 
 }
-
-
 

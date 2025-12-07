@@ -8,7 +8,7 @@ INCLUDE = include
 
 CC = gcc
 DEBUG = -g
-CFLAGS = -Wall -c $(DEBUG)
+CFLAGS = -Wall -c $(DEBUG) -DMLQ_SCHED -DMM_FIXED_MEMSZ
 LFLAGS = -Wall $(DEBUG)
 
 vpath %.c $(SRC)
