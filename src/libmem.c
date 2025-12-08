@@ -422,28 +422,40 @@ int libwrite(
 int free_pcb_memph(struct pcb_t *caller)
 {
   pthread_mutex_lock(&mmvm_lock);
-  int pagenum, fpn;
-  uint32_t pte;
 
-  for (pagenum = 0; pagenum < PAGING_MAX_PGN; pagenum++)
+  struct mm_struct *mm = caller->krnl->mm;
+  struct pgn_t *node = mm->fifo_pgn;
+
+  while (node != NULL)
   {
-    pte = caller->krnl->mm->pgd[pagenum];
+    addr_t pgn = node->pgn;
+    uint32_t pte = pte_get_entry(caller, pgn);
 
     if (PAGING_PAGE_PRESENT(pte))
     {
-      fpn = PAGING_FPN(pte);
-      MEMPHY_put_freefp(caller->krnl->mram, fpn);
+      /* Nếu không swapped → đang ở RAM */
+      if (!PAGING_PTE_SWP(pte)) {
+        addr_t fpn = PAGING_FPN(pte);
+        MEMPHY_put_freefp(caller->krnl->mram, fpn);
+      } 
+      else {
+        /* Nếu swapped → frame nằm trong swap */
+        addr_t swp_off = PAGING_SWP(pte);
+        MEMPHY_put_freefp(caller->krnl->active_mswp, swp_off);
+      }
     }
-    else
-    {
-      fpn = PAGING_SWP(pte);
-      MEMPHY_put_freefp(caller->krnl->active_mswp, fpn);
-    }
+
+    struct pgn_t *tmp = node;
+    node = node->pg_next;
+    free(tmp);
   }
+
+  mm->fifo_pgn = NULL;
 
   pthread_mutex_unlock(&mmvm_lock);
   return 0;
 }
+
 
 
 /*find_victim_page - find victim page
@@ -455,24 +467,32 @@ int find_victim_page(struct mm_struct *mm, addr_t *retpgn)
 {
   struct pgn_t *pg = mm->fifo_pgn;
 
-  /* TODO: Implement the theorical mechanism to find the victim page */
   if (!pg)
-  {
-    return -1;
+    return -1; // không có trang nào để chọn
+
+  /* Trường hợp chỉ có 1 node trong fifo_pgn */
+  if (pg->pg_next == NULL) {
+    *retpgn = pg->pgn;
+    mm->fifo_pgn = NULL;  // danh sách giờ rỗng
+    free(pg);
+    return 0;
   }
+
+  /* Trường hợp có >= 2 node: đi đến node cuối, giữ prev */
   struct pgn_t *prev = NULL;
-  while (pg->pg_next)
+  while (pg->pg_next != NULL)
   {
     prev = pg;
     pg = pg->pg_next;
   }
-  *retpgn = pg->pgn;
-  prev->pg_next = NULL;
 
+  *retpgn = pg->pgn;
+  prev->pg_next = NULL;   // cắt node cuối ra khỏi list
   free(pg);
 
   return 0;
 }
+
 
 /*get_free_vmrg_area - get a free vm region
  *@caller: caller

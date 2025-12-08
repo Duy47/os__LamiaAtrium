@@ -117,51 +117,32 @@ int get_pd_from_pagenum(addr_t pgn,
  */
 int pte_set_swap(struct pcb_t *caller, addr_t pgn, int swptyp, addr_t swpoff)
 {
-//  struct krnl_t *krnl = caller->krnl;
   struct krnl_t *krnl = caller->krnl;
   struct mm_struct *mm = krnl->mm;
+  addr_t pgd = 0;
+  addr_t p4d = 0;
+  addr_t pud = 0;
+  addr_t pmd = 0;
+  addr_t pt  = 0;
   addr_t *pte;
-  addr_t pgd=0;
-  addr_t p4d=0;
-  addr_t pud=0;
-  addr_t pmd=0;
-  addr_t pt=0;
-	
-  // dummy pte alloc to avoid runtime error
-  pte = malloc(sizeof(addr_t));
-#ifdef MM64	
-  /* Get value from the system */
-  /* TODO Perform multi-level page mapping */
+
+#ifdef MM64
+  /* Tính index các mức */
   get_pd_from_pagenum(pgn, &pgd, &p4d, &pud, &pmd, &pt);
-  //... krnl->mm->pgd
-  //... krnl->mm->pt
-  //pte = &krnl->mm->pt;
-  
-  //When a page is swapped out, PTE must record:
-  //This page is not in RAM (not present)
-  /* Level 1: PGD */
-  if (mm->pgd[pgd] == 0)
-      mm->pgd[pgd] = 1;
 
-  /* Level 2: P4D */
-  if (mm->p4d[p4d] == 0)
-      mm->p4d[p4d] = 1;
+  /* Đảm bảo các mức directory đã “có” */
+  if (mm->pgd[pgd] == 0) mm->pgd[pgd] = 1;
+  if (mm->p4d[p4d] == 0) mm->p4d[p4d] = 1;
+  if (mm->pud[pud] == 0) mm->pud[pud] = 1;
+  if (mm->pmd[pmd] == 0) mm->pmd[pmd] = 1;
 
-  /* Level 3: PUD */
-  if (mm->pud[pud] == 0)
-      mm->pud[pud] = 1;
-
-  /* Level 4: PMD */
-  if (mm->pmd[pmd] == 0)
-      mm->pmd[pmd] = 1;
-
-  /* Level 5: PT (actual PTE) */
+  /* PTE cuối cùng (level PT) */
   pte = &mm->pt[pt];
-
 #else
   pte = &krnl->mm->pgd[pgn];
 #endif
-	
+
+  /* Giữ semantics giống bản 32-bit: PRESENT + SWAPPED */
   SETBIT(*pte, PAGING_PTE_PRESENT_MASK);
   SETBIT(*pte, PAGING_PTE_SWAPPED_MASK);
 
@@ -170,6 +151,7 @@ int pte_set_swap(struct pcb_t *caller, addr_t pgn, int swptyp, addr_t swpoff)
 
   return 0;
 }
+
 
 /*
  * pte_set_fpn - Set PTE entry for on-line page
@@ -181,42 +163,25 @@ int pte_set_fpn(struct pcb_t *caller, addr_t pgn, addr_t fpn)
   struct krnl_t *krnl = caller->krnl;
   struct mm_struct *mm = krnl->mm;
 
+  addr_t pgd = 0;
+  addr_t p4d = 0;
+  addr_t pud = 0;
+  addr_t pmd = 0;
+  addr_t pt  = 0;
   addr_t *pte;
-  addr_t pgd=0;
-  addr_t p4d=0;
-  addr_t pud=0;
-  addr_t pmd=0;
-  addr_t pt=0;
-	
-  // dummy pte alloc to avoid runtime error
-  pte = malloc(sizeof(addr_t));
-#ifdef MM64	
-  /* Get value from the system */
-  /* TODO Perform multi-level page mapping */
+
+#ifdef MM64
+  /* Tính index các mức */
   get_pd_from_pagenum(pgn, &pgd, &p4d, &pud, &pmd, &pt);
-  //... krnl->mm->pgd
-  //... krnl->mm->pt
-  //pte = &krnl->mm->pt;
 
-  /* Level 1: PGD */
-  if (mm->pgd[pgd] == 0)
-      mm->pgd[pgd] = 1;   // mark allocated
+  /* Đảm bảo các mức directory đã “có” */
+  if (mm->pgd[pgd] == 0) mm->pgd[pgd] = 1;
+  if (mm->p4d[p4d] == 0) mm->p4d[p4d] = 1;
+  if (mm->pud[pud] == 0) mm->pud[pud] = 1;
+  if (mm->pmd[pmd] == 0) mm->pmd[pmd] = 1;
 
-  /* Level 2: P4D */
-  if (mm->p4d[p4d] == 0)
-      mm->p4d[p4d] = 1;   // mark allocated
-
-  /* Level 3: PUD */
-  if (mm->pud[pud] == 0)
-      mm->pud[pud] = 1;
-
-  /* Level 4: PMD */
-  if (mm->pmd[pmd] == 0)
-      mm->pmd[pmd] = 1;
-
-  /* Level 5: PT (actual page entry) */
+  /* PTE cuối cùng (level PT) */
   pte = &mm->pt[pt];
-
 #else
   pte = &krnl->mm->pgd[pgn];
 #endif
@@ -230,6 +195,7 @@ int pte_set_fpn(struct pcb_t *caller, addr_t pgn, addr_t fpn)
 }
 
 
+
 /* Get PTE page table entry
  * @caller : caller
  * @pgn    : page number
@@ -241,43 +207,22 @@ uint32_t pte_get_entry(struct pcb_t *caller, addr_t pgn)
   struct mm_struct *mm = krnl->mm;
 
   uint32_t pte = 0;
-  addr_t pgd=0;
-  addr_t p4d=0;
-  addr_t pud=0;
-  addr_t pmd=0;
-  addr_t	pt=0;
-	
-  /* TODO Perform multi-level page mapping */
+  addr_t pgd = 0;
+  addr_t p4d = 0;
+  addr_t pud = 0;
+  addr_t pmd = 0;
+  addr_t pt  = 0;
 
   get_pd_from_pagenum(pgn, &pgd, &p4d, &pud, &pmd, &pt);
-  //... krnl->mm->pgd
-  //... krnl->mm->pt
-  //pte = &krnl->mm->pt;	
 
-  //If any level not exist, return 0 (not mapped)
-  /* Level 1: PGD */
-  uint32_t pgd_entry = mm->pgd[pgd];
-  if (pgd_entry == 0)
-      return 0;
+  /* Nếu bất kỳ mức nào chưa được set thì coi như chưa map */
+  if (mm->pgd[pgd] == 0) return 0;
+  if (mm->p4d[p4d] == 0) return 0;
+  if (mm->pud[pud] == 0) return 0;
+  if (mm->pmd[pmd] == 0) return 0;
 
-  /* Level 2: P4D */
-  uint32_t p4d_entry = mm->p4d[p4d];
-  if (p4d_entry == 0)
-      return 0;
-
-  /* Level 3: PUD */
-  uint32_t pud_entry = mm->pud[pud];
-  if (pud_entry == 0)
-      return 0;
-
-  /* Level 4: PMD */
-  uint32_t pmd_entry = mm->pmd[pmd];
-  if (pmd_entry == 0)
-      return 0;
-
-  /* Level 5: PT (actual page table) */
   pte = mm->pt[pt];
-	
+
   return pte;
 }
 
@@ -288,11 +233,27 @@ uint32_t pte_get_entry(struct pcb_t *caller, addr_t pgn)
  **/
 int pte_set_entry(struct pcb_t *caller, addr_t pgn, uint32_t pte_val)
 {
-	struct krnl_t *krnl = caller->krnl;
-	krnl->mm->pgd[pgn]=pte_val;
-	
-	return 0;
+  struct krnl_t *krnl = caller->krnl;
+  struct mm_struct *mm = krnl->mm;
+
+  addr_t pgd = 0;
+  addr_t p4d = 0;
+  addr_t pud = 0;
+  addr_t pmd = 0;
+  addr_t pt  = 0;
+
+  get_pd_from_pagenum(pgn, &pgd, &p4d, &pud, &pmd, &pt);
+
+  if (mm->pgd[pgd] == 0) mm->pgd[pgd] = 1;
+  if (mm->p4d[p4d] == 0) mm->p4d[p4d] = 1;
+  if (mm->pud[pud] == 0) mm->pud[pud] = 1;
+  if (mm->pmd[pmd] == 0) mm->pmd[pmd] = 1;
+
+  mm->pt[pt] = pte_val;
+
+  return 0;
 }
+
 
 
 /*
