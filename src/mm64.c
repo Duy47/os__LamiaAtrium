@@ -128,22 +128,18 @@ int pte_set_swap(struct pcb_t *caller, addr_t pgn, int swptyp, addr_t swpoff)
   addr_t *pte;
 
 #ifdef MM64
-  /* Tính index các mức */
   get_pd_from_pagenum(pgn, &pgd, &p4d, &pud, &pmd, &pt);
 
-  /* Đảm bảo các mức directory đã “có” */
   if (mm->pgd[pgd] == 0) mm->pgd[pgd] = 1;
   if (mm->p4d[p4d] == 0) mm->p4d[p4d] = 1;
   if (mm->pud[pud] == 0) mm->pud[pud] = 1;
   if (mm->pmd[pmd] == 0) mm->pmd[pmd] = 1;
 
-  /* PTE cuối cùng (level PT) */
   pte = &mm->pt[pt];
 #else
   pte = &krnl->mm->pgd[pgn];
 #endif
 
-  /* Giữ semantics giống bản 32-bit: PRESENT + SWAPPED */
   SETBIT(*pte, PAGING_PTE_PRESENT_MASK);
   SETBIT(*pte, PAGING_PTE_SWAPPED_MASK);
 
@@ -172,16 +168,13 @@ int pte_set_fpn(struct pcb_t *caller, addr_t pgn, addr_t fpn)
   addr_t *pte;
 
 #ifdef MM64
-  /* Tính index các mức */
   get_pd_from_pagenum(pgn, &pgd, &p4d, &pud, &pmd, &pt);
 
-  /* Đảm bảo các mức directory đã “có” */
   if (mm->pgd[pgd] == 0) mm->pgd[pgd] = 1;
   if (mm->p4d[p4d] == 0) mm->p4d[p4d] = 1;
   if (mm->pud[pud] == 0) mm->pud[pud] = 1;
   if (mm->pmd[pmd] == 0) mm->pmd[pmd] = 1;
 
-  /* PTE cuối cùng (level PT) */
   pte = &mm->pt[pt];
 #else
   pte = &krnl->mm->pgd[pgn];
